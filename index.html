@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Rank</title>
+
+    <link rel="icon" href="film.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/codemirror.min.css"/>
+    <link rel="stylesheet" href="my.css">
+</head>
+
+<body>
+    <nav class="navbar">
+        <a href="/"><img src="/film.svg" /></a>
+
+        <a href="/" class="active">Home</a>
+        <a href="/about.html">About</a>
+    </nav>
+
+    <main>
+
+        <textarea id="editor">SELECT title, year, rating, genres, votes, type
+FROM movies
+WHERE
+    type = "movie" -- try "tvSeries"
+    AND title = orig_title -- selects English speaking movies
+    AND votes > 50000
+    AND rating > 6
+    AND NOT lower(genres) like '%horror%'
+ORDER BY year DESC, rating DESC
+LIMIT 50</textarea>
+        <button onclick="update_table()">Execute</button>
+        <p class="footprint">See About page to learn about the data</p>
+
+        <div id="table-container"></div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.5.0/sql-wasm.js"></script>
+    <script>
+        async function load_db() {
+            config = {
+                locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.5.0/${filename}`
+            }
+            const sqlPromise = initSqlJs(config);
+            const dataPromise = fetch("/data/im.db").then(res => res.arrayBuffer());
+            const [SQL, buf] = await Promise.all([sqlPromise, dataPromise])
+            db = new SQL.Database(new Uint8Array(buf));
+            console.log("loaded DB")
+            return db
+        }
+
+        function render_table(columns, rows) {
+            const create = name => document.createElement(name);
+
+            const table = create("table");
+            const thead = table.appendChild(create("thead"));
+            const tbody = table.appendChild(create("tbody"));
+            const header_row = thead.appendChild(create("tr"));
+
+            for (const col of columns) {
+                const cell = header_row.appendChild(create("th"));
+                cell.innerHTML = col[0].toUpperCase() + col.slice(1);
+            }
+
+            for (const row of rows) {
+                const row_elem = tbody.appendChild(create("tr"));
+                for (const x of row) {
+                    const cell = row_elem.appendChild(create("td"));
+                    cell.innerHTML = x;
+                }
+            }
+
+            return table;
+        }
+
+        function round_rating(columns, rows) {
+            idx = columns.indexOf("rating");
+
+            if (idx < 0){
+                return
+            }
+
+            rows.forEach(function(row) {
+                row[idx] = Math.round((row[idx] + Number.EPSILON) * 100) / 100;
+            });
+        }
+
+        function abbreviate_votes(columns, rows) {
+            idx = columns.indexOf("votes");
+
+            if (idx < 0){
+                return
+            }
+
+            rows.forEach(function(row) {
+                row[idx] = String(Math.round(row[idx] / 1000)) + "k";
+            });
+        }
+
+        function make_title_clickable(columns, rows) {
+            idx = columns.indexOf("title");
+
+            if (idx < 0) {
+                return
+            }
+
+            rows.forEach(function(row) {
+                title = row[idx]
+                row[idx] = `<a target="_blank" rel="noopener noreferrer" href="https://www.google.com/search?q='${title}'+trailer">${title}</a>`
+            })
+        }
+
+        async function update_table() {
+            query = editor.getValue()
+            db = await db_promise;
+            let [result] = db.exec(query);
+
+            if (result) {
+                var {columns, values: rows} = result;
+            } else {
+                columns = ["Result set empty"];
+                rows = [];
+            }
+
+            round_rating(columns, rows);
+            abbreviate_votes(columns, rows);
+            make_title_clickable(columns, rows);
+
+            const cont = document.querySelector("#table-container");
+            table = render_table(columns, rows);
+
+            while (cont.firstChild) {
+                cont.removeChild(cont.firstChild);
+            }
+
+            cont.appendChild(table);
+        }
+
+        const editor = CodeMirror.fromTextArea(document.querySelector('#editor'), {
+            mode: 'text/x-mysql',
+            extraKeys: {
+                "Ctrl-Enter": update_table,
+                "Cmd-Enter": update_table,
+                "Shift-Enter": update_table,
+            }
+        });
+
+        db_promise = load_db();
+        update_table();
+    </script>
+
+
+</body>
+</html>
